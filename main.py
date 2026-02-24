@@ -1,11 +1,13 @@
-
+import os
+import sys
+import curses
 
 
 
 def menu():
-    print(First version)
 
 
+os.
 
 
 if __name__ == '__main__':
