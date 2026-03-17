@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 PROGRAM_FILE="main.py"
 WORKDIR="$(cd "$(dirname "$0")" && pwd)"
-TMPDIR_INSTALL="/tmp/stego_installer_build"
+TMPDIR_INSTALL="$HOME/.cache/stego_installer_build"
 
 if [[ -t 1 ]]; then
   green=$'\e[0;32m'
@@ -32,6 +32,7 @@ if [[ $EUID -eq 0 ]]; then
   exit 1
 fi
 
+mkdir -p "$TMPDIR_INSTALL"
 export PATH="$HOME/.local/bin:$PATH"
 
 detect_distro() {
@@ -109,9 +110,9 @@ ensure_yay() {
   fi
 
   warn "yay not found, installing..."
-  rm -rf /tmp/yay-build
-  git clone https://aur.archlinux.org/yay.git /tmp/yay-build
-  cd /tmp/yay-build
+  rm -rf "$TMPDIR_INSTALL/yay-build"
+  git clone https://aur.archlinux.org/yay.git "$TMPDIR_INSTALL/yay-build"
+  cd "$TMPDIR_INSTALL/yay-build"
   makepkg -si --noconfirm
   cd "$WORKDIR"
 }
@@ -132,7 +133,7 @@ ensure_base_build_tools() {
       pkg_install python3 python3-pip python3-venv pipx git curl file binutils util-linux ruby ruby-dev build-essential cmake pkg-config
       ;;
     fedora)
-      pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-devel gcc gcc-c++ make cmake pkgconf-pkg-config libmcrypt-devel
+      pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-devel gcc gcc-c++ make cmake pkgconf-pkg-config libmcrypt-devel zlib-devel
       ;;
     opensuse)
       pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-devel gcc gcc-c++ make cmake pkg-config
@@ -176,7 +177,7 @@ clone_and_build_stegseek() {
   info "Installing stegseek from GitHub source..."
 
   if [[ "$DISTRO_FAMILY" == "fedora" ]]; then
-    pkg_install libmcrypt-devel
+    pkg_install libmcrypt-devel zlib-devel
   fi
 
   mkdir -p "$TMPDIR_INSTALL"
