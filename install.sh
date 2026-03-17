@@ -5,16 +5,24 @@ PROGRAM_FILE="main.py"
 WORKDIR="$(cd "$(dirname "$0")" && pwd)"
 TMPDIR_INSTALL="/tmp/stego_installer_build"
 
-green='\033[0;32m'
-yellow='\033[1;33m'
-red='\033[0;31m'
-blue='\033[0;34m'
-nc='\033[0m'
+if [[ -t 1 ]]; then
+  green=$'\e[0;32m'
+  yellow=$'\e[1;33m'
+  red=$'\e[0;31m'
+  blue=$'\e[0;34m'
+  nc=$'\e[0m'
+else
+  green=''
+  yellow=''
+  red=''
+  blue=''
+  nc=''
+fi
 
-info()  { echo -e "${blue}[INFO]${nc} $*"; }
-ok()    { echo -e "${green}[OK]${nc} $*"; }
-warn()  { echo -e "${yellow}[WARN]${nc} $*"; }
-fail()  { echo -e "${red}[ERR]${nc} $*"; }
+info()  { printf "%b[INFO]%b %s\n" "$blue" "$nc" "$*"; }
+ok()    { printf "%b[OK]%b %s\n" "$green" "$nc" "$*"; }
+warn()  { printf "%b[WARN]%b %s\n" "$yellow" "$nc" "$*"; }
+fail()  { printf "%b[ERR]%b %s\n" "$red" "$nc" "$*"; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -27,30 +35,81 @@ fi
 export PATH="$HOME/.local/bin:$PATH"
 
 detect_distro() {
+  if [[ ! -f /etc/os-release ]]; then
+    fail "Cannot detect distro."
+    exit 1
+  fi
+
   . /etc/os-release
+
   case "${ID:-unknown}" in
-    ubuntu|debian|linuxmint|pop) DISTRO_FAMILY="debian" ;;
-    arch|manjaro|endeavouros) DISTRO_FAMILY="arch" ;;
-    fedora) DISTRO_FAMILY="fedora" ;;
-    opensuse-tumbleweed|opensuse-leap|suse) DISTRO_FAMILY="opensuse" ;;
-    *) DISTRO_FAMILY="unknown" ;;
+    ubuntu|debian|linuxmint|pop)
+      DISTRO_FAMILY="debian"
+      ;;
+    arch|manjaro|endeavouros)
+      DISTRO_FAMILY="arch"
+      ;;
+    fedora)
+      DISTRO_FAMILY="fedora"
+      ;;
+    opensuse-tumbleweed|opensuse-leap|suse)
+      DISTRO_FAMILY="opensuse"
+      ;;
+    *)
+      if [[ "${ID_LIKE:-}" == *debian* ]]; then
+        DISTRO_FAMILY="debian"
+      elif [[ "${ID_LIKE:-}" == *arch* ]]; then
+        DISTRO_FAMILY="arch"
+      elif [[ "${ID_LIKE:-}" == *fedora* || "${ID_LIKE:-}" == *rhel* ]]; then
+        DISTRO_FAMILY="fedora"
+      elif [[ "${ID_LIKE:-}" == *suse* ]]; then
+        DISTRO_FAMILY="opensuse"
+      else
+        DISTRO_FAMILY="unknown"
+      fi
+      ;;
   esac
+
   info "Detected distro: ${ID:-unknown} ($DISTRO_FAMILY)"
+
+  if [[ "$DISTRO_FAMILY" == "unknown" ]]; then
+    fail "Unsupported distro."
+    exit 1
+  fi
 }
 
 pkg_install() {
   case "$DISTRO_FAMILY" in
-    debian) sudo apt update && sudo apt install -y "$@" ;;
-    arch) sudo pacman -Sy --noconfirm "$@" ;;
-    fedora) sudo dnf install -y "$@" ;;
-    opensuse) sudo zypper install -y "$@" ;;
-    *) fail "Unsupported distro"; exit 1 ;;
+    debian)
+      sudo apt update
+      sudo apt install -y "$@"
+      ;;
+    arch)
+      sudo pacman -Sy --noconfirm "$@"
+      ;;
+    fedora)
+      sudo dnf install -y "$@"
+      ;;
+    opensuse)
+      sudo zypper install -y "$@"
+      ;;
+    *)
+      fail "Unsupported distro"
+      exit 1
+      ;;
   esac
 }
 
 ensure_yay() {
   [[ "$DISTRO_FAMILY" != "arch" ]] && return 0
-  command -v yay >/dev/null 2>&1 && return 0
+
+  if have yay; then
+    ok "yay found"
+    return 0
+  fi
+
+  warn "yay not found, installing..."
+  rm -rf /tmp/yay-build
   git clone https://aur.archlinux.org/yay.git /tmp/yay-build
   cd /tmp/yay-build
   makepkg -si --noconfirm
@@ -63,27 +122,132 @@ aur_install() {
 }
 
 ensure_base_build_tools() {
+  info "Installing base dependencies..."
+
   case "$DISTRO_FAMILY" in
-    arch) pkg_install python python-pip git curl file binutils util-linux ruby base-devel cmake pkgconf ;;
-    debian) pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-dev build-essential cmake pkg-config ;;
-    fedora) pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-devel gcc gcc-c++ make cmake pkgconf-pkg-config ;;
-    opensuse) pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-devel gcc gcc-c++ make cmake pkg-config ;;
+    arch)
+      pkg_install python python-pip git curl file binutils util-linux ruby base-devel cmake pkgconf
+      ;;
+    debian)
+      pkg_install python3 python3-pip python3-venv pipx git curl file binutils util-linux ruby ruby-dev build-essential cmake pkg-config
+      ;;
+    fedora)
+      pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-devel gcc gcc-c++ make cmake pkgconf-pkg-config
+      ;;
+    opensuse)
+      pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-devel gcc gcc-c++ make cmake pkg-config
+      ;;
   esac
+}
+
+install_exiftool() {
+  have exiftool && return 0
+
+  case "$DISTRO_FAMILY" in
+    debian)
+      pkg_install exiftool || pkg_install libimage-exiftool-perl
+      ;;
+    arch)
+      pkg_install perl-image-exiftool
+      ;;
+    fedora)
+      pkg_install perl-Image-ExifTool
+      ;;
+    opensuse)
+      pkg_install exiftool
+      ;;
+  esac
+}
+
+install_exiv2() { have exiv2 || pkg_install exiv2; }
+install_file_tool() { have file || pkg_install file; }
+install_strings() { have strings || pkg_install binutils; }
+install_hexdump() { have hexdump || pkg_install util-linux; }
+install_steghide() { have steghide || pkg_install steghide; }
+
+clone_and_build_stegseek() {
+  info "Installing stegseek from GitHub..."
+  mkdir -p "$TMPDIR_INSTALL"
+  rm -rf "$TMPDIR_INSTALL/stegseek"
+  git clone https://github.com/RickdeJager/stegseek.git "$TMPDIR_INSTALL/stegseek"
+  cd "$TMPDIR_INSTALL/stegseek"
+  mkdir -p build
+  cd build
+  cmake ..
+  make -j"$(nproc)"
+  sudo make install
+  cd "$WORKDIR"
+}
+
+install_stegseek() {
+  have stegseek && return 0
+
+  if [[ "$DISTRO_FAMILY" == "arch" ]]; then
+    pkg_install stegseek 2>/dev/null || true
+    have stegseek && return 0
+    aur_install stegseek 2>/dev/null || true
+    have stegseek && return 0
+  fi
+
+  clone_and_build_stegseek
+}
+
+install_zsteg() {
+  have zsteg && return 0
+
+  if [[ "$DISTRO_FAMILY" == "arch" ]]; then
+    aur_install zsteg 2>/dev/null || true
+    have zsteg && return 0
+  fi
+
+  gem install --user-install zsteg
+
+  local ruby_user_bin
+  ruby_user_bin="$(ruby -e 'puts Gem.user_dir')/bin"
+  export PATH="$ruby_user_bin:$PATH"
 }
 
 install_stegoveritas() {
   have stegoveritas && return 0
+
   if [[ "$DISTRO_FAMILY" == "arch" ]]; then
     aur_install python-stegoveritas 2>/dev/null || true
     have stegoveritas && return 0
   fi
+
+  if [[ "$DISTRO_FAMILY" == "debian" ]]; then
+    if have pipx; then
+      pipx install stegoveritas || true
+      export PATH="$HOME/.local/bin:$PATH"
+      have stegoveritas_install_deps && stegoveritas_install_deps || true
+      return 0
+    fi
+
+    python3 -m venv "$HOME/.venvs/stegoveritas"
+    "$HOME/.venvs/stegoveritas/bin/pip" install --upgrade pip
+    "$HOME/.venvs/stegoveritas/bin/pip" install stegoveritas
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$HOME/.venvs/stegoveritas/bin/stegoveritas" "$HOME/.local/bin/stegoveritas"
+    ln -sf "$HOME/.venvs/stegoveritas/bin/stegoveritas_install_deps" "$HOME/.local/bin/stegoveritas_install_deps"
+    export PATH="$HOME/.local/bin:$PATH"
+    have stegoveritas_install_deps && stegoveritas_install_deps || true
+    return 0
+  fi
+
   python3 -m pip install --user --upgrade stegoveritas
   export PATH="$HOME/.local/bin:$PATH"
-  command -v stegoveritas_install_deps >/dev/null 2>&1 && stegoveritas_install_deps || true
+
+  if have stegoveritas_install_deps; then
+    stegoveritas_install_deps || true
+  fi
 }
+
+install_binwalk() { have binwalk || pkg_install binwalk; }
+install_foremost() { have foremost || pkg_install foremost; }
 
 install_pngcheck() {
   have pngcheck && return 0
+
   if [[ "$DISTRO_FAMILY" == "arch" ]]; then
     aur_install pngcheck
   else
@@ -93,6 +257,7 @@ install_pngcheck() {
 
 install_jpeginfo() {
   have jpeginfo && return 0
+
   if [[ "$DISTRO_FAMILY" == "arch" ]]; then
     aur_install jpeginfo
   else
@@ -104,57 +269,106 @@ install_zbar() {
   if have zbarimg || have zbarcam; then
     return 0
   fi
+
   case "$DISTRO_FAMILY" in
     debian) pkg_install zbar-tools ;;
     arch|fedora|opensuse) pkg_install zbar ;;
   esac
 }
 
-detect_distro
-ensure_base_build_tools
+check_tools() {
+  echo
+  export PATH="$HOME/.local/bin:$PATH"
+  local ruby_user_bin
+  ruby_user_bin="$(ruby -e 'puts Gem.user_dir')/bin"
+  export PATH="$ruby_user_bin:$PATH"
 
-have exiftool || pkg_install perl-image-exiftool || true
-have exiv2 || pkg_install exiv2 || true
-have file || pkg_install file || true
-have strings || pkg_install binutils || true
-have hexdump || pkg_install util-linux || true
-have steghide || pkg_install steghide || true
-have stegseek || pkg_install stegseek || true
-have zsteg || gem install zsteg || true
-install_stegoveritas || true
-have binwalk || pkg_install binwalk || true
-have foremost || pkg_install foremost || true
-install_pngcheck || true
-install_jpeginfo || true
-install_zbar || true
+  local missing=0
 
-echo
-for pair in \
-  "exiftool exiftool" \
-  "exiv2 exiv2" \
-  "file file" \
-  "strings strings" \
-  "hexdump hexdump" \
-  "steghide steghide" \
-  "stegseek stegseek" \
-  "zsteg zsteg" \
-  "stegoveritas stegoveritas" \
-  "binwalk binwalk" \
-  "foremost foremost" \
-  "pngcheck pngcheck" \
-  "jpeginfo jpeginfo" \
-  "zbar zbarimg"
-do
-  set -- $pair
-  if command -v "$2" >/dev/null 2>&1; then
-    echo "[OK] $1 -> $2"
+  check_one() {
+    local name="$1"
+    local bin="$2"
+    if have "$bin"; then
+      ok "$name -> $bin"
+    else
+      fail "$name NOT FOUND"
+      missing=1
+    fi
+  }
+
+  check_one exiftool exiftool
+  check_one exiv2 exiv2
+  check_one file file
+  check_one strings strings
+  check_one hexdump hexdump
+  check_one steghide steghide
+  check_one stegseek stegseek
+  check_one zsteg zsteg
+  check_one stegoveritas stegoveritas
+  check_one binwalk binwalk
+  check_one foremost foremost
+  check_one pngcheck pngcheck
+  check_one jpeginfo jpeginfo
+  check_one zbar zbarimg
+
+  return $missing
+}
+
+find_program_file() {
+  local candidates=(
+    "$WORKDIR/$PROGRAM_FILE"
+    "$WORKDIR/src/$PROGRAM_FILE"
+    "$WORKDIR/app/$PROGRAM_FILE"
+  )
+
+  for f in "${candidates[@]}"; do
+    if [[ -f "$f" ]]; then
+      echo "$f"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+run_program() {
+  local target=""
+  if target="$(find_program_file)"; then
+    echo
+    info "Launching $target ..."
+    python3 "$target"
   else
-    echo "[ERR] $1 NOT FOUND"
+    warn "$PROGRAM_FILE not found in: $WORKDIR"
   fi
-done
+}
 
-if [[ -f "$WORKDIR/$PROGRAM_FILE" ]]; then
-  python3 "$WORKDIR/$PROGRAM_FILE"
-else
-  echo "[WARN] $PROGRAM_FILE not found in: $WORKDIR"
-fi
+main() {
+  detect_distro
+  ensure_base_build_tools
+
+  install_exiftool || warn "Failed: exiftool"
+  install_exiv2 || warn "Failed: exiv2"
+  install_file_tool || warn "Failed: file"
+  install_strings || warn "Failed: strings"
+  install_hexdump || warn "Failed: hexdump"
+  install_steghide || warn "Failed: steghide"
+  install_stegseek || warn "Failed: stegseek"
+  install_zsteg || warn "Failed: zsteg"
+  install_stegoveritas || warn "Failed: stegoveritas"
+  install_binwalk || warn "Failed: binwalk"
+  install_foremost || warn "Failed: foremost"
+  install_pngcheck || warn "Failed: pngcheck"
+  install_jpeginfo || warn "Failed: jpeginfo"
+  install_zbar || warn "Failed: zbar"
+
+  echo
+  if check_tools; then
+    ok "All tools installed."
+  else
+    warn "Some tools are still missing."
+  fi
+
+  run_program
+}
+
+main "$@"
