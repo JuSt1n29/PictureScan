@@ -1,4 +1,4 @@
-# Picture Scanner
+# PictureScan
 
 This project is still in development.
 
