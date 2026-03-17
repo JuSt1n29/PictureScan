@@ -25,7 +25,6 @@ warn()  { printf "%b[WARN]%b %s\n" "$yellow" "$nc" "$*"; }
 fail()  { printf "%b[ERR]%b %s\n" "$red" "$nc" "$*"; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
-
 if [[ $EUID -eq 0 ]]; then
   fail "Don't run this script by sudo/root."
   echo "Run this way: ./install.sh"
@@ -34,6 +33,29 @@ fi
 
 mkdir -p "$TMPDIR_INSTALL"
 export PATH="$HOME/.local/bin:$PATH"
+
+fix_build_dir_permissions() {
+  mkdir -p "$TMPDIR_INSTALL" || true
+
+  if [[ ! -w "$TMPDIR_INSTALL" ]]; then
+    warn "Build dir is not writable, fixing permissions..."
+    sudo mkdir -p "$TMPDIR_INSTALL"
+    sudo chown -R "$USER":"$USER" "$TMPDIR_INSTALL"
+  fi
+}
+
+clean_path_force() {
+  local path="$1"
+
+  if [[ -e "$path" ]]; then
+    rm -rf "$path" 2>/dev/null || true
+  fi
+
+  if [[ -e "$path" ]]; then
+    warn "Normal cleanup failed for $path, retrying with sudo..."
+    sudo rm -rf "$path"
+  fi
+}
 
 detect_distro() {
   if [[ ! -f /etc/os-release ]]; then
@@ -79,6 +101,32 @@ detect_distro() {
   fi
 }
 
+disable_cdrom_repos_if_present() {
+  [[ "$DISTRO_FAMILY" != "debian" ]] && return 0
+
+  local changed=0
+
+  if [[ -f /etc/apt/sources.list ]] && grep -qE '^[[:space:]]*deb cdrom:' /etc/apt/sources.list; then
+    warn "Found cdrom repository in /etc/apt/sources.list, disabling it..."
+    sudo sed -i 's/^[[:space:]]*deb cdrom:/# deb cdrom:/g' /etc/apt/sources.list
+    changed=1
+  fi
+
+  if [[ -d /etc/apt/sources.list.d ]]; then
+    while IFS= read -r file; do
+      if grep -qE '^[[:space:]]*deb cdrom:' "$file"; then
+        warn "Found cdrom repository in $file, disabling it..."
+        sudo sed -i 's/^[[:space:]]*deb cdrom:/# deb cdrom:/g' "$file"
+        changed=1
+      fi
+    done < <(find /etc/apt/sources.list.d -maxdepth 1 -type f -name '*.list' 2>/dev/null)
+  fi
+
+  if [[ "$changed" -eq 1 ]]; then
+    ok "Disabled cdrom repositories."
+  fi
+}
+
 pkg_install() {
   case "$DISTRO_FAMILY" in
     debian)
@@ -110,7 +158,7 @@ ensure_yay() {
   fi
 
   warn "yay not found, installing..."
-  rm -rf "$TMPDIR_INSTALL/yay-build"
+  clean_path_force "$TMPDIR_INSTALL/yay-build"
   git clone https://aur.archlinux.org/yay.git "$TMPDIR_INSTALL/yay-build"
   cd "$TMPDIR_INSTALL/yay-build"
   makepkg -si --noconfirm
@@ -180,8 +228,9 @@ clone_and_build_stegseek() {
     pkg_install libmcrypt-devel zlib-devel mhash-devel libjpeg-turbo-devel
   fi
 
-  mkdir -p "$TMPDIR_INSTALL"
-  rm -rf "$TMPDIR_INSTALL/stegseek"
+  fix_build_dir_permissions
+  clean_path_force "$TMPDIR_INSTALL/stegseek"
+
   git clone https://github.com/RickdeJager/stegseek.git "$TMPDIR_INSTALL/stegseek"
   cd "$TMPDIR_INSTALL/stegseek"
   mkdir -p build
@@ -401,6 +450,7 @@ run_program() {
 
 main() {
   detect_distro
+  disable_cdrom_repos_if_present
   ensure_base_build_tools
 
   install_exiftool || warn "Failed: exiftool"
