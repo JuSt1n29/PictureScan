@@ -132,7 +132,7 @@ ensure_base_build_tools() {
       pkg_install python3 python3-pip python3-venv pipx git curl file binutils util-linux ruby ruby-dev build-essential cmake pkg-config
       ;;
     fedora)
-      pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-devel gcc gcc-c++ make cmake pkgconf-pkg-config
+      pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-devel gcc gcc-c++ make cmake pkgconf-pkg-config libmcrypt-devel
       ;;
     opensuse)
       pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-devel gcc gcc-c++ make cmake pkg-config
@@ -174,6 +174,11 @@ install_stegseek_deb() {
 
 clone_and_build_stegseek() {
   info "Installing stegseek from GitHub source..."
+
+  if [[ "$DISTRO_FAMILY" == "fedora" ]]; then
+    pkg_install libmcrypt-devel
+  fi
+
   mkdir -p "$TMPDIR_INSTALL"
   rm -rf "$TMPDIR_INSTALL/stegseek"
   git clone https://github.com/RickdeJager/stegseek.git "$TMPDIR_INSTALL/stegseek"
