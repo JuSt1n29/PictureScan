@@ -129,7 +129,7 @@ ensure_base_build_tools() {
       pkg_install python python-pip git curl file binutils util-linux ruby base-devel cmake pkgconf
       ;;
     debian)
-      pkg_install python3 python3-pip python3-venv pipx git curl file binutils util-linux ruby ruby-dev build-essential cmake pkg-config libmcrypt-dev
+      pkg_install python3 python3-pip python3-venv pipx git curl file binutils util-linux ruby ruby-dev build-essential cmake pkg-config
       ;;
     fedora)
       pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-devel gcc gcc-c++ make cmake pkgconf-pkg-config
@@ -164,13 +164,16 @@ install_strings() { have strings || pkg_install binutils; }
 install_hexdump() { have hexdump || pkg_install util-linux; }
 install_steghide() { have steghide || pkg_install steghide; }
 
+install_stegseek_deb() {
+  info "Installing stegseek from .deb release..."
+  mkdir -p "$TMPDIR_INSTALL"
+  local deb_file="$TMPDIR_INSTALL/stegseek_0.6-1.deb"
+  curl -L -o "$deb_file" "https://github.com/RickdeJager/stegseek/releases/download/v0.6/stegseek_0.6-1.deb"
+  sudo apt install -y "$deb_file"
+}
+
 clone_and_build_stegseek() {
-  info "Installing stegseek from GitHub..."
-
-  if [[ "$DISTRO_FAMILY" == "debian" ]]; then
-    pkg_install libmcrypt-dev
-  fi
-
+  info "Installing stegseek from GitHub source..."
   mkdir -p "$TMPDIR_INSTALL"
   rm -rf "$TMPDIR_INSTALL/stegseek"
   git clone https://github.com/RickdeJager/stegseek.git "$TMPDIR_INSTALL/stegseek"
@@ -185,6 +188,11 @@ clone_and_build_stegseek() {
 
 install_stegseek() {
   have stegseek && return 0
+
+  if [[ "$DISTRO_FAMILY" == "debian" ]]; then
+    install_stegseek_deb || true
+    have stegseek && return 0
+  fi
 
   if [[ "$DISTRO_FAMILY" == "arch" ]]; then
     pkg_install stegseek 2>/dev/null || true
@@ -327,10 +335,9 @@ verify_all_tools() {
   info "Checking installed tools..."
 
   for i in "${!tool_names[@]}"; do
-    name="${tool_names[$i]}"
-    bins="${tool_bins[$i]}"
-
-    found_bin=""
+    local name="${tool_names[$i]}"
+    local bins="${tool_bins[$i]}"
+    local found_bin=""
     IFS='|' read -r -a variants <<< "$bins"
 
     for bin in "${variants[@]}"; do
