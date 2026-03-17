@@ -14,6 +14,6 @@ The program scans an image using multiple analysis tools and collects results fr
 ## Run
 
 ```bash
-git clone <repo>
-cd <repo>
+git clone [<repo>](https://github.com/JuSt1n29/PictureScan)
+cd [<repo>](https://github.com/JuSt1n29/PictureScan)
 bash install.sh
