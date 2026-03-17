@@ -27,8 +27,8 @@ fail()  { printf "%b[ERR]%b %s\n" "$red" "$nc" "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 if [[ $EUID -eq 0 ]]; then
-  fail "Не запускай этот скрипт через sudo/root."
-  echo "Запусти так: ./install.sh"
+  fail "Don't run this script by sudo/root."
+  echo "Run this way: ./install.sh"
   exit 1
 fi
 
@@ -129,7 +129,7 @@ ensure_base_build_tools() {
       pkg_install python python-pip git curl file binutils util-linux ruby base-devel cmake pkgconf
       ;;
     debian)
-      pkg_install python3 python3-pip python3-venv pipx git curl file binutils util-linux ruby ruby-dev build-essential cmake pkg-config
+      pkg_install python3 python3-pip python3-venv pipx git curl file binutils util-linux ruby ruby-dev build-essential cmake pkg-config libmcrypt-dev
       ;;
     fedora)
       pkg_install python3 python3-pip git curl file binutils util-linux ruby ruby-devel gcc gcc-c++ make cmake pkgconf-pkg-config
@@ -142,7 +142,6 @@ ensure_base_build_tools() {
 
 install_exiftool() {
   have exiftool && return 0
-
   case "$DISTRO_FAMILY" in
     debian)
       pkg_install exiftool || pkg_install libimage-exiftool-perl
@@ -167,6 +166,11 @@ install_steghide() { have steghide || pkg_install steghide; }
 
 clone_and_build_stegseek() {
   info "Installing stegseek from GitHub..."
+
+  if [[ "$DISTRO_FAMILY" == "debian" ]]; then
+    pkg_install libmcrypt-dev
+  fi
+
   mkdir -p "$TMPDIR_INSTALL"
   rm -rf "$TMPDIR_INSTALL/stegseek"
   git clone https://github.com/RickdeJager/stegseek.git "$TMPDIR_INSTALL/stegseek"
@@ -266,7 +270,7 @@ install_jpeginfo() {
 }
 
 install_zbar() {
-  if have zbarimg || have zbarcam; then
+  if have zbarimg || have zbarcam || have zbar; then
     return 0
   fi
 
@@ -276,8 +280,9 @@ install_zbar() {
   esac
 }
 
-check_tools() {
+verify_all_tools() {
   echo
+
   export PATH="$HOME/.local/bin:$PATH"
   local ruby_user_bin
   ruby_user_bin="$(ruby -e 'puts Gem.user_dir')/bin"
@@ -285,33 +290,72 @@ check_tools() {
 
   local missing=0
 
-  check_one() {
-    local name="$1"
-    local bin="$2"
-    if have "$bin"; then
-      ok "$name -> $bin"
+  local tool_names=(
+    "exiftool"
+    "exiv2"
+    "file"
+    "strings"
+    "hexdump"
+    "steghide"
+    "stegseek"
+    "zsteg"
+    "stegoveritas"
+    "binwalk"
+    "foremost"
+    "pngcheck"
+    "jpeginfo"
+    "zbar"
+  )
+
+  local tool_bins=(
+    "exiftool"
+    "exiv2"
+    "file"
+    "strings"
+    "hexdump"
+    "steghide"
+    "stegseek"
+    "zsteg"
+    "stegoveritas"
+    "binwalk"
+    "foremost"
+    "pngcheck"
+    "jpeginfo"
+    "zbarimg|zbarcam|zbar"
+  )
+
+  info "Checking installed tools..."
+
+  for i in "${!tool_names[@]}"; do
+    name="${tool_names[$i]}"
+    bins="${tool_bins[$i]}"
+
+    found_bin=""
+    IFS='|' read -r -a variants <<< "$bins"
+
+    for bin in "${variants[@]}"; do
+      if have "$bin"; then
+        found_bin="$bin"
+        break
+      fi
+    done
+
+    if [[ -n "$found_bin" ]]; then
+      ok "$name -> $found_bin"
     else
       fail "$name NOT FOUND"
       missing=1
     fi
-  }
+  done
 
-  check_one exiftool exiftool
-  check_one exiv2 exiv2
-  check_one file file
-  check_one strings strings
-  check_one hexdump hexdump
-  check_one steghide steghide
-  check_one stegseek stegseek
-  check_one zsteg zsteg
-  check_one stegoveritas stegoveritas
-  check_one binwalk binwalk
-  check_one foremost foremost
-  check_one pngcheck pngcheck
-  check_one jpeginfo jpeginfo
-  check_one zbar zbarimg
-
-  return $missing
+  echo
+  if [[ "$missing" -eq 0 ]]; then
+    ok "All required tools are installed."
+    return 0
+  else
+    warn "Some required tools are still missing."
+    return 1
+  fi
 }
 
 find_program_file() {
@@ -361,13 +405,7 @@ main() {
   install_jpeginfo || warn "Failed: jpeginfo"
   install_zbar || warn "Failed: zbar"
 
-  echo
-  if check_tools; then
-    ok "All tools installed."
-  else
-    warn "Some tools are still missing."
-  fi
-
+  verify_all_tools || true
   run_program
 }
 
